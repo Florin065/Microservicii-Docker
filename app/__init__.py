@@ -1,9 +1,12 @@
 from flask import Flask
 from flask_pymongo import PyMongo
+from pymongo import MongoClient
 
 app = Flask(__name__)
-app.config["MONGO_URI"] = "mongodb://mongo:27017/weather_db"
+app.config["MONGO_URI"] = "mongodb://root:example@mongo:27017/weather_db?authSource=admin"
+
 mongo = PyMongo(app)
+client = MongoClient("mongodb://mongo:27017")
 
 db = mongo.db
 db.countries.create_index('nume', unique=True)

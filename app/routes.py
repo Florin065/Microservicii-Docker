@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from bson import ObjectId, errors as bson_errors
 from flask import jsonify, request
 from app import app, db
@@ -88,12 +90,8 @@ temperature_schema = {
         'type': 'integer',
         'required': True
     },
-    'value': {
-        'type': 'float',
-        'required': True
-    },
-    'timestamp': {
-        'type': 'datetime',
+    'valoare': {
+        'type': 'number',
         'required': True
     }
 }
@@ -107,12 +105,8 @@ temperature_schema_update = {
         'type': 'integer',
         'required': True
     },
-    'value': {
-        'type': 'float',
-        'required': True
-    },
-    'timestamp': {
-        'type': 'datetime',
+    'valoare': {
+        'type': 'number',
         'required': True
     }
 }
@@ -133,6 +127,26 @@ def generate_sequence(collection_name):
         return_document=True
     )
     return sequence['seq']
+
+
+def get_temperatures_query(base_query, from_date=None, until_date=None):
+    from_date = datetime.strptime(from_date, '%Y-%m-%d').timestamp() * 1000 if from_date else None
+    until_date = datetime.strptime(until_date, '%Y-%m-%d').timestamp() * 1000 if until_date else None
+
+    if from_date and until_date:
+        base_query['timestamp'] = {'$gte': from_date, '$lte': until_date}
+    elif from_date:
+        base_query['timestamp'] = {'$gte': from_date}
+    elif until_date:
+        base_query['timestamp'] = {'$lte': until_date}
+
+    temperatures = list(db.temperatures.find(base_query))
+    for temperature in temperatures:
+        temperature['id'] = temperature['_id']
+        del temperature['_id']
+        del temperature['idOras']
+        temperature['timestamp'] = datetime.fromtimestamp(temperature['timestamp'] / 1000)
+    return temperatures
 
 
 # ------------- ROUTE: /api/countries ----------------
@@ -302,24 +316,24 @@ def delete_city(id):
 def add_temperature():
     data = request.json
 
-    is_valid, errors = validate_temperature_input(data, temperature_schema)
+    is_valid = validator_temperatures.validate(data)
     if not is_valid:
-        return jsonify({'error': 'Invalid input', 'details': errors}), 400
+        return jsonify({'error': 'Invalid input', 'details': validator_temperatures.errors}), 400
 
     city_exists = db.cities.find_one({'_id': data['idOras']})
     if not city_exists:
         return jsonify({'error': 'City not found'}), 404
 
     temperature = {
-        '_id': ObjectId(),
+        '_id': generate_sequence('temperatures'),
         'idOras': data['idOras'],
-        'value': data['value'],
-        'timestamp': data['timestamp']
+        'valoare': data['valoare'],
+        'timestamp': round(datetime.now().timestamp() * 1000)
     }
 
     try:
-        result = db.temperatures.insert_one(temperature)
-        return jsonify({'id': str(result.inserted_id)}), 201
+        db.temperatures.insert_one(temperature)
+        return jsonify({'id': temperature['_id']}), 201
     except Exception as e:
         return jsonify({'error': f"Database conflict: {str(e)}"}), 409
 
@@ -332,22 +346,25 @@ def get_temperatures():
     until_date = request.args.get('until')
 
     query = {}
-    if lat:
-        query['lat'] = lat
-    if lon:
-        query['lon'] = lon
-    if from_date and until_date:
-        query['timestamp'] = {'$gte': from_date, '$lte': until_date}
-    elif from_date:
-        query['timestamp'] = {'$gte': from_date}
-    elif until_date:
-        query['timestamp'] = {'$lte': until_date}
 
-    temperatures = list(db.temperatures.find(query))
-    for temperature in temperatures:
-        temperature['id'] = str(temperature['_id'])
-        del temperature['_id']
+    if lat or lon:
+        city_query = {}
+        if lat:
+            city_query['lat'] = float(lat)
+        if lon:
+            city_query['lon'] = float(lon)
+
+        cities = list(db.cities.find(city_query, {'_id': 1}))
+        if not cities:
+            return jsonify([]), 200
+
+        city_ids = [city['_id'] for city in cities]
+        query['idOras'] = {'$in': city_ids}
+
+    temperatures = get_temperatures_query(query, from_date, until_date)
+
     return jsonify(temperatures), 200
+
 
 
 @app.route('/api/temperatures/cities/<int:id_oras>', methods=['GET'])
@@ -356,17 +373,7 @@ def get_temperatures_by_city(id_oras):
     until_date = request.args.get('until')
 
     query = {'idOras': id_oras}
-    if from_date and until_date:
-        query['timestamp'] = {'$gte': from_date, '$lte': until_date}
-    elif from_date:
-        query['timestamp'] = {'$gte': from_date}
-    elif until_date:
-        query['timestamp'] = {'$lte': until_date}
-
-    temperatures = list(db.temperatures.find(query))
-    for temperature in temperatures:
-        temperature['id'] = str(temperature['_id'])
-        del temperature['_id']
+    temperatures = get_temperatures_query(query, from_date, until_date)
     return jsonify(temperatures), 200
 
 
@@ -377,49 +384,39 @@ def get_temperatures_by_country(id_tara):
 
     cities = list(db.cities.find({'idTara': id_tara}))
     query = {'idOras': {'$in': [city['_id'] for city in cities]}}
-    if from_date and until_date:
-        query['timestamp'] = {'$gte': from_date, '$lte': until_date}
-    elif from_date:
-        query['timestamp'] = {'$gte': from_date}
-    elif until_date:
-        query['timestamp'] = {'$lte': until_date}
-
-    temperatures = list(db.temperatures.find(query))
-    for temperature in temperatures:
-        temperature['id'] = str(temperature['_id'])
-        del temperature['_id']
+    temperatures = get_temperatures_query(query, from_date, until_date)
     return jsonify(temperatures), 200
 
 
-@app.route('/api/temperatures/<string:id>', methods=['PUT'])
+@app.route('/api/temperatures/<int:id>', methods=['PUT'])
 def update_temperature(id):
     data = request.json
 
-    obj_id = validate_objectid(id)
-    is_valid, errors = validate_temperature_input(data, temperature_schema_update)
+    is_valid = validator_temperatures_update.validate(data)
     if not is_valid:
-        return jsonify({'error': 'Invalid input', 'details': errors}), 400
+        return jsonify({'error': 'Invalid input', 'details': validator_temperatures_update.errors}), 400
 
     update_data = {
         'idOras': data['idOras'],
-        'value': data['value'],
-        'timestamp': data['timestamp']
+        'valoare': data['valoare'],
+        'timestamp': round(datetime.now().timestamp() * 1000)
     }
 
-    result = db.temperatures.update_one({'_id': obj_id}, {'$set': update_data})
-    if result.matched_count == 0:
-        return jsonify({'error': 'Temperature not found'}), 404
-    return jsonify({'message': 'Temperature updated successfully'}), 200
+    try:
+        result = db.temperatures.update_one({'_id': id}, {'$set': update_data})
+        if result.matched_count == 0:
+            return jsonify({'error': 'Temperature not found'}), 404
+        return jsonify({'message': 'Temperature updated successfully'}), 200
+    except Exception as e:
+        return jsonify({'error': f"Database conflict: {str(e)}"}), 409
 
 
-@app.route('/api/temperatures/<string:id>', methods=['DELETE'])
+@app.route('/api/temperatures/<int:id>', methods=['DELETE'])
 def delete_temperature(id):
-    obj_id = validate_objectid(id)
-    result = db.temperatures.delete_one({'_id': obj_id})
+    if id <= 0:
+        return jsonify({'error': 'Invalid ID format. ID must be a positive integer'}), 400
+
+    result = db.temperatures.delete_one({'_id': id})
     if result.deleted_count == 0:
         return jsonify({'error': 'Temperature not found'}), 404
-
-    if not obj_id:
-        return jsonify({'error': 'Invalid ID format'}), 400
-
     return jsonify({'message': 'Temperature deleted successfully'}), 200
