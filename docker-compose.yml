@@ -10,7 +10,7 @@ services:
     depends_on:
       - mongo
     networks:
-      - app-network
+      - flask
 
   mongo:
     image: mongo:latest
@@ -28,7 +28,8 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - app-network
+      - flask
+      - express
 
   mongo-express:
     image: mongo-express:latest
@@ -42,11 +43,13 @@ services:
       ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_EXPRESS_PASSWORD}
       ME_CONFIG_MONGODB_SERVER: ${MONGO_HOSTNAME}
     networks:
-      - app-network
+      - express
 
 volumes:
   mongo_data:
 
 networks:
-  app-network:
-    driver: bridge
+    flask:
+      driver: bridge
+    express:
+      driver: bridge

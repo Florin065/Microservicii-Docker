@@ -3,7 +3,7 @@ from flask_pymongo import PyMongo
 from pymongo import MongoClient
 
 app = Flask(__name__)
-app.config["MONGO_URI"] = "mongodb://root:example@mongo:27017/weather_db?authSource=admin"
+app.config["MONGO_URI"] = "mongodb://admin:pass@mongo:27017/weather_db?authSource=admin"
 
 mongo = PyMongo(app)
 client = MongoClient("mongodb://mongo:27017")

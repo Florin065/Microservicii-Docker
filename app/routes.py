@@ -1,6 +1,5 @@
 from datetime import datetime
 
-from bson import ObjectId, errors as bson_errors
 from flask import jsonify, request
 from app import app, db
 import cerberus
@@ -190,7 +189,7 @@ def update_country(id):
     data = request.json
 
     is_valid = validator_countries_update.validate(data)
-    if not is_valid:
+    if not is_valid or id != data['id']:
         return jsonify({'error': 'Invalid input', 'details': validator_countries_update.errors}), 400
 
     update_data = {
@@ -278,7 +277,7 @@ def update_city(id):
     data = request.json
 
     is_valid = validator_cities_update.validate(data)
-    if not is_valid:
+    if not is_valid or id != data['id']:
         return jsonify({'error': 'Invalid input', 'details': validator_cities_update.errors}), 400
 
     update_data = {
@@ -366,7 +365,6 @@ def get_temperatures():
     return jsonify(temperatures), 200
 
 
-
 @app.route('/api/temperatures/cities/<int:id_oras>', methods=['GET'])
 def get_temperatures_by_city(id_oras):
     from_date = request.args.get('from')
@@ -393,7 +391,7 @@ def update_temperature(id):
     data = request.json
 
     is_valid = validator_temperatures_update.validate(data)
-    if not is_valid:
+    if not is_valid or id != data['id']:
         return jsonify({'error': 'Invalid input', 'details': validator_temperatures_update.errors}), 400
 
     update_data = {
